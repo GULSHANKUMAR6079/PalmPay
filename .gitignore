@@ -9,13 +9,9 @@
 *.sqlite3
 palmpay.db
 
-# Generated Receipts & Local PCA Artifacts
+# Generated Receipts
 receipts/
-*.joblib
-pca.joblib
 
-# Downloaded Model Files
-hand_landmarker.task
 
 # Python Caches & Virtual Environments
 __pycache__/

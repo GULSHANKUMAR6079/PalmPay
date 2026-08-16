@@ -39,15 +39,9 @@ palm image ──▶ MediaPipe HandLandmarker ──▶ align_palm() ──▶ H
 ```bash
 pip install -r requirements.txt
 
-# Download the MediaPipe hand landmark model (~12 MB)
-curl -o hand_landmarker.task \
-  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
-
-# Fit the embedder's PCA on a bootstrap batch of palm photos BEFORE first run.
-# Put whatever photos you have in one folder -- even just 1 per hand per
-# teammate works, the script tops it up with augmented variants and prints a
-# summary of successful detections vs failures.
-python scripts/fit_pca.py --photos_dir ./bootstrap_photos --out ./pca.joblib
+# (Note: hand_landmarker.task and pca.joblib are pre-packaged in the repo)
+# If you ever need to re-fit PCA on new bootstrap photos:
+# python scripts/fit_pca.py --photos_dir ./bootstrap_photos --out ./pca.joblib
 
 # Razorpay TEST MODE keys — place them in a `.env` file in the project root:
 # RAZORPAY_KEY_ID=rzp_test_xxxxxxxx

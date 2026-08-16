@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palm Pay — Merchant Terminal</title>
+<style>
+  :root {
+    --ink: #0d1b1e;
+    --panel: #12262a;
+    --panel-2: #173136;
+    --line: #244449;
+    --mint: #4fd1ae;
+    --amber: #e8b04b;
+    --red: #e2685f;
+    --text: #eaf3f2;
+    --text-dim: #90aeae;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% -10%, #163336 0%, var(--ink) 55%);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .terminal {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 28px 26px 24px;
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .brand .mark {
+    width: 34px; height: 34px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--mint), #2a8f79);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .brand span {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    font-size: 15px;
+    color: var(--text-dim);
+  }
+  .steps {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+  .steps .dot {
+    flex: 1;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--line);
+    transition: background 0.3s;
+  }
+  .steps .dot.done { background: var(--mint); }
+  .steps .dot.active { background: var(--amber); }
+
+  h1 {
+    font-size: 19px;
+    margin: 0 0 4px;
+    font-weight: 600;
+  }
+  p.hint {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin: 0 0 18px;
+    line-height: 1.5;
+  }
+
+  video, canvas {
+    width: 100%;
+    border-radius: 14px;
+    background: #000;
+    display: block;
+  }
+  .video-wrap {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .video-wrap::after {
+    content: "";
+    position: absolute; inset: 14%;
+    border: 2px dashed rgba(79,209,174,0.55);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  canvas { display: none; }
+
+  .identity {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+  .identity .name { font-weight: 600; font-size: 16px; }
+  .identity .sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+  .identity .conf { color: var(--mint); font-size: 12px; margin-top: 6px; }
+
+  .amount-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .amount-row span.rs { font-size: 20px; color: var(--text-dim); }
+  .amount-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 28px;
+    font-weight: 600;
+    width: 100%;
+  }
+  .cap-note { font-size: 11px; color: var(--text-dim); margin: -10px 0 16px 2px; }
+
+  button {
+    width: 100%;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.08s, opacity 0.2s;
+  }
+  button:active { transform: scale(0.98); }
+  button.primary { background: var(--mint); color: #06201c; }
+  button.ghost {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .status {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text-dim);
+    margin-bottom: 14px;
+    min-height: 18px;
+  }
+  .status.err { color: var(--red); }
+  .status .spin {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    border-top-color: var(--mint);
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .result {
+    text-align: center;
+    padding: 20px 10px 6px;
+  }
+  .result .icon {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+    margin: 0 auto 14px;
+  }
+  .result.ok .icon { background: rgba(79,209,174,0.15); color: var(--mint); }
+  .result.bad .icon { background: rgba(226,104,95,0.15); color: var(--red); }
+  .result .amt { font-size: 26px; font-weight: 700; margin-bottom: 4px; }
+  .result .msg { color: var(--text-dim); font-size: 13px; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div class="terminal">
+  <div class="brand">
+    <div class="mark">🖐</div>
+    <span>PALM PAY · MERCHANT TERMINAL</span>
+  </div>
+
+  <div class="steps">
+    <div class="dot" id="dot-1"></div>
+    <div class="dot" id="dot-2"></div>
+    <div class="dot" id="dot-3"></div>
+  </div>
+
+  <!-- STEP 1: identify -->
+  <div id="step-identify">
+    <h1>Show palm to identify</h1>
+    <p class="hint">Center your palm inside the guide, hold steady.</p>
+    <div class="video-wrap"><video id="video" autoplay playsinline muted></video></div>
+    <div class="status" id="status-identify"></div>
+    <button class="primary" id="btn-identify">Scan palm</button>
+  </div>
+
+  <!-- STEP 1b: register (shown when identify finds no match) -->
+  <div id="step-register" style="display:none;">
+    <h1>New palm — let's register you</h1>
+    <p class="hint">We didn't find a match. Fill this in once; you won't need to again.</p>
+    <img id="register-preview" style="width:120px;height:120px;object-fit:cover;border-radius:12px;margin-bottom:12px;" />
+    <input type="text" id="reg-name" placeholder="Full name" style="width:100%;margin-bottom:8px;">
+    <input type="text" id="reg-contact" placeholder="Phone number" style="width:100%;margin-bottom:8px;">
+    <input type="email" id="reg-email" placeholder="Email" style="width:100%;margin-bottom:8px;">
+    <input type="text" id="reg-upi" placeholder="UPI VPA (e.g. name@bank)" style="width:100%;margin-bottom:8px;">
+    <div class="status" id="status-register"></div>
+    <button class="primary" id="btn-register">Register palm</button>
+    <button class="ghost" id="btn-register-cancel">Back / try scanning again</button>
+  </div>
+
+  <!-- STEP 2: amount -->
+  <div id="step-amount" style="display:none;">
+    <h1>Confirm amount</h1>
+    <div class="identity" id="identity-box"></div>
+    <div class="amount-row">
+      <span class="rs">₹</span>
+      <input type="number" id="amount-input" placeholder="0" min="1" max="100" step="1">
+    </div>
+    <div class="cap-note">Max ₹100 per transaction on this terminal.</div>
+    <div class="status" id="status-amount"></div>
+    <button class="primary" id="btn-set-amount">Looks correct — continue</button>
+  </div>
+
+  <!-- STEP 3: authorize -->
+  <div id="step-authorize" style="display:none;">
+    <h1>Show palm again to pay</h1>
+    <p class="hint">Same palm, one more scan — this is what actually authorizes the payment.</p>
+    <div class="video-wrap"><video id="video2" autoplay playsinline muted></video></div>
+    <div class="status" id="status-authorize"></div>
+    <button class="primary" id="btn-authorize">Scan to pay ₹<span id="amt-label">0</span></button>
+  </div>
+
+  <!-- RESULT -->
+  <div id="step-result" style="display:none;"></div>
+
+  <canvas id="canvas"></canvas>
+  <button class="ghost" id="btn-reset" style="display:none;">New transaction</button>
+</div>
+
+<script>
+const API_BASE = "http://localhost:8000";
+const MERCHANT_ID = "merchant-demo-1";
+
+let sessionId = null, matchedAmount = 0;
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+async function startCamera(videoEl) {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  videoEl.srcObject = stream;
+  return stream;
+}
+
+function captureBlob(videoEl) {
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  ctx.drawImage(videoEl, 0, 0);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+}
+
+// Quick client-side sanity check before we even bother calling the backend:
+// rejects frames that are clearly too dark or too blurry to detect a palm
+// in. Not a substitute for the backend's real hand-detection check -- just
+// saves a round trip and gives the user a faster, clearer retry prompt.
+function checkImageQuality(sourceCanvas) {
+  const w = 160, h = Math.round((sourceCanvas.height / sourceCanvas.width) * 160);
+  const small = document.createElement("canvas");
+  small.width = w; small.height = h;
+  const sctx = small.getContext("2d");
+  sctx.drawImage(sourceCanvas, 0, 0, w, h);
+  const { data } = sctx.getImageData(0, 0, w, h);
+
+  const gray = new Float32Array(w * h);
+  let brightnessSum = 0;
+  for (let i = 0; i < w * h; i++) {
+    const g = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    gray[i] = g;
+    brightnessSum += g;
+  }
+  const avgBrightness = brightnessSum / (w * h);
+
+  // Simple Laplacian-variance sharpness estimate.
+  let lapSum = 0, lapSumSq = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      const lap = 4 * gray[idx] - gray[idx - 1] - gray[idx + 1] - gray[idx - w] - gray[idx + w];
+      lapSum += lap; lapSumSq += lap * lap; n++;
+    }
+  }
+  const lapVariance = lapSumSq / n - (lapSum / n) ** 2;
+
+  if (avgBrightness < 40) return { ok: false, reason: "Too dark — move to a brighter spot." };
+  if (avgBrightness > 235) return { ok: false, reason: "Too bright / washed out — reduce glare." };
+  if (lapVariance < 25) return { ok: false, reason: "Image too blurry — hold your hand steady." };
+  return { ok: true };
+}
+
+function setStatus(id, text, isErr = false, spinning = false) {
+  const el = document.getElementById(id);
+  el.className = "status" + (isErr ? " err" : "");
+  el.innerHTML = (spinning ? '<span class="spin"></span>' : "") + text;
+}
+
+function setDots(active) {
+  for (let i = 1; i <= 3; i++) {
+    const d = document.getElementById(`dot-${i}`);
+    d.className = "dot" + (i < active ? " done" : i === active ? " active" : "");
+  }
+}
+
+function showStep(name) {
+  ["identify", "register", "amount", "authorize"].forEach(s => {
+    document.getElementById(`step-${s}`).style.display = s === name ? "block" : "none";
+  });
+  document.getElementById("step-result").style.display = "none";
+  document.getElementById("btn-reset").style.display = "none";
+}
+
+async function apiFetch(url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    throw new Error("Server unreachable — please check if the backend is running.");
+  }
+  let data;
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Server returned invalid JSON (Status ${res.status}).`);
+    }
+  } else {
+    const text = await res.text();
+    throw new Error(text || `Server returned an error (Status ${res.status}).`);
+  }
+
+  if (!res.ok) {
+    const detail = data && data.detail ? data.detail : `Server error (${res.status})`;
+    throw new Error(detail);
+  }
+  return data;
+}
+
+// --- Step 1: identify ---
+let videoStream1;
+startCamera(document.getElementById("video")).then(s => videoStream1 = s);
+
+let lastCapturedBlob = null;
+
+document.getElementById("btn-identify").onclick = async () => {
+  setStatus("status-identify", "Hold on — capturing your hand…", false, true);
+  try {
+    const blob = await captureBlob(document.getElementById("video"));
+
+    const quality = checkImageQuality(canvas);
+    if (!quality.ok) {
+      setStatus("status-identify", quality.reason, true);
+      return; // let the user retry the same button, no backend call wasted
+    }
+
+    setStatus("status-identify", "Searching…", false, true);
+    lastCapturedBlob = blob;
+
+    const form = new FormData();
+    form.append("merchant_id", MERCHANT_ID);
+    form.append("palm_photo", blob, "palm.jpg");
+    const data = await apiFetch(`${API_BASE}/session/identify`, { method: "POST", body: form });
+
+    if (!data.matched) {
+      const confPct = (data.confidence * 100).toFixed(1);
+      setStatus("status-register", `No enrolled match found (Best match similarity: ${confPct}%). Please register:`);
+      document.getElementById("register-preview").src = URL.createObjectURL(blob);
+      showStep("register");
+      return;
+    }
+
+    sessionId = data.session_id;
+    document.getElementById("identity-box").innerHTML = `
+      <div class="name">${data.name}</div>
+      <div class="sub">${data.masked_upi}</div>
+      <div class="conf">Match confidence ${(data.confidence * 100).toFixed(1)}%</div>`;
+    setStatus("status-identify", "");
+    setDots(2);
+    showStep("amount");
+  } catch (e) {
+    setStatus("status-identify", e.message, true);
+  }
+};
+
+// --- Step 1b: register (only reached when identify found no match) ---
+document.getElementById("btn-register").onclick = async () => {
+  const name = document.getElementById("reg-name").value.trim();
+  const contact = document.getElementById("reg-contact").value.trim();
+  const email = document.getElementById("reg-email").value.trim();
+  const upi = document.getElementById("reg-upi").value.trim();
+
+  const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  const phoneRegex = /^\+?[0-9]{7,15}$/;
+  const upiRegex = /^[\w.-]+@[\w.-]+$/;
+
+  if (!name || !contact || !email || !upi) {
+    setStatus("status-register", "Please fill in every field.", true);
+    return;
+  }
+  if (!emailRegex.test(email)) {
+    setStatus("status-register", "Please enter a valid email address.", true);
+    return;
+  }
+  if (!phoneRegex.test(contact)) {
+    setStatus("status-register", "Please enter a valid phone number (7 to 15 digits).", true);
+    return;
+  }
+  if (!upiRegex.test(upi)) {
+    setStatus("status-register", "Please enter a valid UPI ID (e.g. name@bank).", true);
+    return;
+  }
+
+  if (!lastCapturedBlob) {
+    setStatus("status-register", "No captured photo found — go back and scan again.", true);
+    return;
+  }
+
+  setStatus("status-register", "Registering…", false, true);
+  try {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("contact", contact);
+    form.append("email", email);
+    form.append("upi_vpa", upi);
+    form.append("palm_photos", lastCapturedBlob, "palm.jpg");
+
+    const data = await apiFetch(`${API_BASE}/customers/register`, { method: "POST", body: form });
+
+    setStatus("status-register", "");
+    setStatus("status-identify", "Registered! Scan your palm again to pay.");
+    showStep("identify");
+  } catch (e) {
+    setStatus("status-register", e.message, true);
+  }
+};
+
+document.getElementById("btn-register-cancel").onclick = () => {
+  setStatus("status-identify", "");
+  showStep("identify");
+};
+
+// --- Step 2: amount ---
+document.getElementById("btn-set-amount").onclick = async () => {
+  const amount = parseFloat(document.getElementById("amount-input").value);
+  if (!amount || amount <= 0 || amount > 100) {
+    setStatus("status-amount", "Enter an amount between ₹1 and ₹100", true);
+    return;
+  }
+  setStatus("status-amount", "Saving…", false, true);
+  try {
+    const data = await apiFetch(`${API_BASE}/session/set-amount`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, amount_rupees: amount }),
+    });
+
+    matchedAmount = amount;
+    document.getElementById("amt-label").textContent = amount;
+    setStatus("status-amount", "");
+    setDots(3);
+    showStep("authorize");
+    startCamera(document.getElementById("video2"));
+  } catch (e) {
+    setStatus("status-amount", e.message, true);
+  }
+};
+
+// --- Step 3: authorize ---
+document.getElementById("btn-authorize").onclick = async () => {
+  setStatus("status-authorize", "Confirming it's the same palm…", false, true);
+  try {
+    const blob = await captureBlob(document.getElementById("video2"));
+    const form = new FormData();
+    form.append("session_id", sessionId);
+    form.append("palm_photo", blob, "palm.jpg");
+    const data = await apiFetch(`${API_BASE}/session/authorize`, { method: "POST", body: form });
+    renderResult(data);
+  } catch (e) {
+    setStatus("status-authorize", e.message, true);
+  }
+};
+
+function renderResult(data) {
+  ["identify", "amount", "authorize"].forEach(s => document.getElementById(`step-${s}`).style.display = "none");
+  const box = document.getElementById("step-result");
+  box.style.display = "block";
+
+  if (data.status === "paid") {
+    box.innerHTML = `
+      <div class="result ok">
+        <div class="icon">✓</div>
+        <div class="amt">₹${matchedAmount} paid</div>
+        <div class="msg">Ref: ${data.razorpay_payment_id}</div>
+        <a class="msg" href="${API_BASE}${data.receipt_url}" target="_blank" style="color:var(--mint)">Print receipt →</a>
+      </div>`;
+  } else {
+    box.innerHTML = `
+      <div class="result bad">
+        <div class="icon">✕</div>
+        <div class="amt">Payment not completed</div>
+        <div class="msg">${data.reason || "Please try again"}</div>
+      </div>`;
+  }
+  document.getElementById("btn-reset").style.display = "block";
+}
+
+document.getElementById("btn-reset").onclick = () => location.reload();
+</script>
+</body>
+</html>

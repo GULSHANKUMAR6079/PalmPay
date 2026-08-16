@@ -1,0 +1,13 @@
+mediapipe==0.10.33
+opencv-python==4.13.0.92
+numpy
+scikit-learn
+scikit-image
+reportlab
+
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-multipart
+razorpay

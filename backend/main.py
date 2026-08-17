@@ -30,10 +30,26 @@ import numpy as np
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import Base, engine, get_db
 from backend.models import Customer, PalmEmbedding, Transaction, TransactionStatus
+
+Base.metadata.create_all(bind=engine)
+
+# Auto-migrate SQLite schema if columns don't exist yet
+with engine.connect() as conn:
+    try:
+        conn.execute(text("ALTER TABLE transactions ADD COLUMN identify_handedness VARCHAR;"))
+        conn.commit()
+    except Exception:
+        pass
+    try:
+        conn.execute(text("ALTER TABLE transactions ADD COLUMN identify_embedding JSON;"))
+        conn.commit()
+    except Exception:
+        pass
 from backend.palm.augment import augment_palm_image
 from backend.palm.detector import PalmDetector, align_palm
 from backend.palm.embedder import PalmEmbedder
@@ -71,7 +87,8 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Palm Pay Prototype")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -96,13 +113,27 @@ async def global_exception_handler(request: Request, exc: Exception):
 MATCH_THRESHOLD = float(os.environ.get("MATCH_THRESHOLD", "0.70"))
 AUTO_APPROVE_MANDATE = os.environ.get("AUTO_APPROVE_MANDATE", "true").lower() == "true"
 
+cnn_env = os.environ.get("PALM_CNN_PATH")
+if cnn_env and os.path.exists(cnn_env):
+    CNN_MODEL_PATH = cnn_env
+elif os.path.exists("mobilenet_v3_palm.pth"):
+    CNN_MODEL_PATH = "mobilenet_v3_palm.pth"
+elif os.path.exists("mobilenet_v3_palm.onnx"):
+    CNN_MODEL_PATH = "mobilenet_v3_palm.onnx"
+else:
+    CNN_MODEL_PATH = None
+
 detector = PalmDetector(model_path=MODEL_PATH)
-# embedding_dim here only matters if load() below finds nothing and a
-# fresh embedder is fit later -- the loaded PCA (fit via scripts/fit_pca.py)
-# determines the real output dimension. Keep this in sync with that script.
-embedder = PalmEmbedder(embedding_dim=24)
-if os.path.exists(PCA_PATH):
-    embedder.load(PCA_PATH)
+if CNN_MODEL_PATH and os.path.exists(CNN_MODEL_PATH):
+    from backend.palm.cnn_embedder import PalmEmbedderCNN
+    embedder = PalmEmbedderCNN(CNN_MODEL_PATH)
+    print(f"[*] Loaded CNN Model Embedder from {CNN_MODEL_PATH}")
+else:
+    embedder = PalmEmbedder(embedding_dim=24)
+    if os.path.exists(PCA_PATH):
+        embedder.load(PCA_PATH)
+        print(f"[*] Loaded HOG+PCA Embedder from {PCA_PATH}")
+
 matcher = PalmMatcher(match_threshold=MATCH_THRESHOLD)
 
 razorpay_client = RazorpayMandateClient()  # reads RAZORPAY_KEY_ID / SECRET from env
@@ -112,8 +143,16 @@ razorpay_client = RazorpayMandateClient()  # reads RAZORPAY_KEY_ID / SECRET from
 def load_existing_embeddings():
     """Matcher is in-memory, so repopulate it from the DB on every restart."""
     db = next(get_db())
+    expected_dim = getattr(embedder, "embedding_dim", 128)
+    loaded_count = 0
     for emb_row in db.query(PalmEmbedding).all():
-        matcher.add(customer_id=emb_row.customer_id, embedding=np.array(emb_row.vector))
+        vec = np.array(emb_row.vector)
+        if vec.shape[0] == expected_dim:
+            matcher.add(customer_id=emb_row.customer_id, embedding=vec)
+            loaded_count += 1
+        else:
+            print(f"[!] Startup: Skipped legacy {vec.shape[0]}-D embedding for customer #{emb_row.customer_id} (active model expects {expected_dim}-D)")
+    print(f"[*] Matcher initialized with {loaded_count} active {expected_dim}-D embeddings.")
 
 
 def _read_upload_as_bgr(file_bytes: bytes) -> np.ndarray:
@@ -124,15 +163,23 @@ def _read_upload_as_bgr(file_bytes: bytes) -> np.ndarray:
     return img
 
 
-def _detect_align_embed(file_bytes: bytes) -> np.ndarray:
+def _detect_align_embed(file_bytes: bytes):
     frame = _read_upload_as_bgr(file_bytes)
-    landmarks = detector.detect(frame)
+    landmarks, handedness, score = detector.detect_with_meta(frame)
     if landmarks is None:
-        raise HTTPException(422, "No hand detected in image")
+        raise HTTPException(422, "No hand detected in camera frame")
+    
+    # 🫀 Liveness & Blood Flow Check (Spoof Prevention)
+    is_live, liveness_score, live_msg = detector.verify_liveness(frame, landmarks)
+    if not is_live:
+        raise HTTPException(422, f"🫀 Liveness Check Failed: {live_msg}")
+
     aligned = align_palm(frame, landmarks)
     if aligned is None:
-        raise HTTPException(422, "Could not align palm (hand too small/ambiguous pose)")
-    return embedder.embed(aligned)
+        raise HTTPException(422, "Please hold your hand vertically upright inside the posture guide frame")
+
+    embedding = embedder.embed(aligned)
+    return embedding, handedness, liveness_score
 
 
 # ---------------------------------------------------------------------------
@@ -182,12 +229,17 @@ def register_customer(
     aligned_real = []
     for photo in palm_photos:
         frame = _read_upload_as_bgr(photo.file.read())
-        landmarks = detector.detect(frame)
+        landmarks, handedness, score = detector.detect_with_meta(frame)
         if landmarks is None:
-            raise HTTPException(422, "No hand detected in one of the uploaded photos")
+            raise HTTPException(422, "No hand detected in uploaded palm photo")
+        
+        is_live, liveness_score, live_msg = detector.verify_liveness(frame, landmarks)
+        if not is_live:
+            raise HTTPException(422, f"🫀 Registration Liveness Failed: {live_msg}")
+
         aligned = align_palm(frame, landmarks)
         if aligned is None:
-            raise HTTPException(422, "Could not align palm in one of the uploaded photos")
+            raise HTTPException(422, "Please hold your hand vertically upright inside the posture guide frame")
         aligned_real.append(aligned)
 
     # Top up with augmented variants if we got fewer real photos than
@@ -202,6 +254,16 @@ def register_customer(
         templates = templates[:max(TEMPLATES_PER_CUSTOMER, len(aligned_real))]
 
     embeddings = [embedder.embed(img) for img in templates]
+
+    # Biometric Deduplication Check: Block registering an already enrolled palm
+    existing_cid, dedup_confidence = matcher.identify(embeddings[0])
+    if existing_cid is not None:
+        existing_cust = db.query(Customer).get(existing_cid)
+        cust_name = existing_cust.name if existing_cust else f"#{existing_cid}"
+        raise HTTPException(
+            400,
+            f"⚠️ BIOMETRIC DEDUPLICATION FAILED: This palm is ALREADY enrolled in the system under customer '{cust_name}' (Confidence: {(dedup_confidence*100):.1f}%)! The same palm cannot be registered again."
+        )
 
     # End-to-end transactional execution
     try:
@@ -311,7 +373,7 @@ def identify(
     palm_photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    embedding = _detect_align_embed(palm_photo.file.read())
+    embedding, handedness, liveness_score = _detect_align_embed(palm_photo.file.read())
     customer_id, confidence = matcher.identify(embedding)
 
     if customer_id is None:
@@ -326,6 +388,8 @@ def identify(
         merchant_id=merchant_id,
         status=TransactionStatus.IDENTIFIED,
         identify_confidence=confidence,
+        identify_handedness=handedness,
+        identify_embedding=embedding.tolist(),
     )
     db.add(txn)
     db.commit()
@@ -366,14 +430,42 @@ def authorize(
     if not txn or txn.status != TransactionStatus.AMOUNT_SET:
         raise HTTPException(409, "Session not ready for authorization")
 
-    embedding = _detect_align_embed(palm_photo.file.read())
+    embedding, handedness, liveness_score = _detect_align_embed(palm_photo.file.read())
+
+    # 1. Strict Handedness Check (Left vs Right Hand)
+    if txn.identify_handedness and handedness and txn.identify_handedness != handedness:
+        txn.status = TransactionStatus.REJECTED_MISMATCH
+        db.commit()
+        return AuthorizeResponse(
+            status="rejected_mismatch",
+            reason=f"⚠️ HANDEDNESS MISMATCH! You identified with your {txn.identify_handedness} hand in Step 1, but presented your {handedness} hand for authorization. Please use your {txn.identify_handedness} hand."
+        )
+
+    # 2. Strict Session Palm Scan Comparison (Matches exact physical hand scan from Step 1)
+    if txn.identify_embedding:
+        step1_vec = np.array(txn.identify_embedding, dtype=np.float32)
+        step1_norm = step1_vec / (np.linalg.norm(step1_vec) or 1.0)
+        step3_norm = embedding / (np.linalg.norm(embedding) or 1.0)
+        session_sim = float(step1_norm @ step3_norm)
+        
+        if session_sim < 0.78:
+            txn.status = TransactionStatus.REJECTED_MISMATCH
+            db.commit()
+            return AuthorizeResponse(
+                status="rejected_mismatch",
+                reason=f"⚠️ PALM MISMATCH (Similarity {session_sim:.2f} < 0.78)! Payment Rejected! Hand presented in Step 3 does NOT match the hand identified in Step 1."
+            )
+
     same_person, score = matcher.verify(customer_id=txn.customer_id, embedding=embedding)
     txn.authorize_confidence = score
 
     if not same_person:
         txn.status = TransactionStatus.REJECTED_MISMATCH
         db.commit()
-        return AuthorizeResponse(status="rejected_mismatch", reason="Palm did not match the identified customer")
+        return AuthorizeResponse(
+            status="rejected_mismatch", 
+            reason="⚠️ PALM MISMATCH — PAYMENT REJECTED! The hand presented does NOT match the customer identified in Step 1."
+        )
 
     customer = db.query(Customer).get(txn.customer_id)
     try:

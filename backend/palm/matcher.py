@@ -32,6 +32,9 @@ class PalmMatcher:
     def add(self, customer_id: int, embedding: np.ndarray) -> None:
         norm_emb = embedding / (np.linalg.norm(embedding) or 1.0)
         with self._lock:
+            if self._embeddings and self._embeddings[0].shape[0] != norm_emb.shape[0]:
+                print(f"[!] Matcher warning: Ignoring mismatched {norm_emb.shape[0]}-D embedding (expected {self._embeddings[0].shape[0]}-D)")
+                return
             self._embeddings.append(norm_emb)
             self._customer_ids.append(customer_id)
 
@@ -46,6 +49,10 @@ class PalmMatcher:
             customer_ids = list(self._customer_ids)
 
         query = embedding / (np.linalg.norm(embedding) or 1.0)
+        if embeddings_matrix.shape[1] != query.shape[0]:
+            print(f"[!] Matcher query dimension mismatch: matrix is {embeddings_matrix.shape[1]}-D, query is {query.shape[0]}-D")
+            return None, 0.0
+
         sims = embeddings_matrix @ query  # cosine sim (unit vectors)
         best_idx = int(np.argmax(sims))
         best_score = float(sims[best_idx])

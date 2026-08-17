@@ -70,6 +70,9 @@ class Transaction(Base):
     identify_confidence = Column(Float, nullable=True)
     authorize_confidence = Column(Float, nullable=True)
 
+    identify_handedness = Column(String, nullable=True)
+    identify_embedding = Column(JSON, nullable=True)
+
     razorpay_payment_id = Column(String, nullable=True)
     receipt_path = Column(String, nullable=True)
 

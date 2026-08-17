@@ -1,10 +1,22 @@
+# Core Computer Vision & Biometrics
 mediapipe==0.10.33
-opencv-python==4.13.0.92
+opencv-python>=4.8.0
 numpy
 scikit-learn
 scikit-image
-reportlab
+joblib
 
+# Deep Learning & ONNX Model Runtime
+torch
+torchvision
+onnx
+onnxruntime
+
+# Receipt Generation & Utilities
+reportlab
+python-dotenv
+
+# Backend & Web API
 fastapi
 uvicorn[standard]
 sqlalchemy
